@@ -113,7 +113,7 @@ MOCK[3].videoRating = { "S7-Q1": 4, "S7-Q2": 5, "S7-Q3": 4 };
 const fresh = makeCandidate("s7", "Nurul Huda", "nurul@example.com", "mid", 51);   // submitted, not graded yet
 fresh.ai = {}; MOCK.push(fresh);
 MOCK.forEach(m => { m.email = m.email.replace("example.com", "sqlacc.com"); m.videoFolder = m.name.trim().replace(/[^\w\s-]/g, "").replace(/\s+/g, "_"); m.videoUploadConfirmed = m.status !== "in_progress" && m.id !== "s6"; });
-const VIDEO_ROOT = "https://sqlacc.sharepoint.com/sites/Sandbox/Shared%20Documents/TimeTec%20Probation%20Test/Candidate%20Videos"; // change to your own video folder link
+const VIDEO_ROOT = "https://drive.google.com/drive/project/1Xb9iGCVGbwGWogSSv9ScspIcpK3f-q9u?usp=sharing"; // video folder link (Google Drive)
 const folderOf = c => c.videoFolder || c.name.trim().replace(/[^\w\s-]/g, "").replace(/\s+/g, "_");
 // A score is the admin's own score (manualScore) or, if none, the AI score. Both are 0 to 10.
 const scoreOf = (c, qid) => { const m = (c.manualScore || {})[qid]; return Number.isInteger(m) ? m : (c.ai && c.ai[qid] ? c.ai[qid].score : null); };
