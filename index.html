@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Probation Test Candidate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
+<style>
+/* Layout: fixed sidebar of 7 steps + one working column. Sign-in is a single centred card. */
+:root{
+  --bg:#f3f5f7; --surface:#ffffff; --fg:#14232e; --muted:#5b6b78; --line:#d8e0e6;
+  --accent:#0b5f8f; --accent-fg:#ffffff; --accent-soft:#e3f0f8;
+  --warn:#b45309; --warn-soft:#fdf0dc; --ok:#17794a; --ok-soft:#e0f4ea; --bad:#b42318;
+  --f-display:'Bricolage Grotesque',system-ui,sans-serif;
+  --f-body:'IBM Plex Sans',system-ui,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0d1820; --surface:#14232e; --fg:#e6eef3; --muted:#93a5b3; --line:#273946;
+  --accent:#5db4e6; --accent-fg:#06202f; --accent-soft:#12364a;
+  --warn:#f0a94a; --warn-soft:#3a2a10; --ok:#4cc88a; --ok-soft:#10382a; --bad:#ff8a80; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0d1820; --surface:#14232e; --fg:#e6eef3; --muted:#93a5b3; --line:#273946;
+  --accent:#5db4e6; --accent-fg:#06202f; --accent-soft:#12364a;
+  --warn:#f0a94a; --warn-soft:#3a2a10; --ok:#4cc88a; --ok-soft:#10382a; --bad:#ff8a80; color-scheme:dark}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.55;padding-inline:16px;padding-block:16px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;letter-spacing:-.01em}
+a{color:var(--accent)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.muted{color:var(--muted)}
+.mono{font-family:var(--f-mono)}
+.btn{display:inline-flex;align-items:center;gap:.5rem;padding:.6rem 1rem;border-radius:8px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer;text-decoration:none}
+.btn:hover{border-color:var(--accent)}
+.btn:focus-visible,.inp:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn-primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.inp{width:100%;padding:.65rem .8rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+textarea.inp{min-height:150px;resize:vertical;line-height:1.55}
+.timer{font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-size:1.6rem}
+.timer.low{color:var(--warn)}
+.step{display:flex;align-items:center;gap:.6rem;width:100%;text-align:left;padding:.55rem .7rem;border-radius:8px;color:var(--fg)}
+.step.cur{background:var(--accent-soft);font-weight:600}
+.step.locked{color:var(--muted)}
+.dot{width:1.5rem;height:1.5rem;border-radius:99px;border:1px solid var(--line);display:grid;place-items:center;font-size:.75rem;flex:none}
+.dot.done{background:var(--ok);border-color:var(--ok);color:#fff}
+.dot.cur{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.bar{height:6px;border-radius:99px;background:var(--line);overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent)}
+.pill{font-size:.75rem;padding:.15rem .5rem;border-radius:99px;background:var(--accent-soft);color:var(--accent);font-weight:600}
+.wrap{max-width:1100px;margin-inline:auto}
+</style>
+
+<style>body{margin:0}</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useMemo } = React;
+
+/* ------------------------------------------------------------------
+   BACKEND ADDRESS. Leave empty to run this page as a preview with fake data.
+   After you deploy the Worker, put its address here, for example
+   const API_BASE = "https://probation-api.yourname.workers.dev";
+------------------------------------------------------------------- */
+const API_BASE = "https://probation-api.CHANGE-ME.workers.dev";
+
+async function post(path, body) {
+  const res = await fetch(API_BASE + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || "The server did not answer. Try again."), { status: res.status });
+  return data;
+}
+const realApi = {
+  start: (name, email) => post("/api/start", { name, email }),
+  save: b => post("/api/save", b),
+  advance: b => post("/api/advance", b),
+};
+
+/* ---------- Preview backend: the same three calls, kept in memory ---------- */
+const folderName = n => n.trim().replace(/[^\w\s-]/g, "").replace(/\s+/g, "_");
+const PREVIEW_CFG = {"source":"Notion: TimeTec HR Probation Question Bank","syncedAt":"2026-10-07","sectionSeconds":1800,"sections":[{"n":1,"name":"Mobile Clocking","video":false},{"n":2,"name":"Leave Rules","video":false},{"n":3,"name":"Claim Workflows","video":false},{"n":4,"name":"Roster Logic","video":false},{"n":5,"name":"Payroll Integration","video":false},{"n":6,"name":"Profile","video":false},{"n":7,"name":"Customer Simulation","video":true}],"questions":[{"id":"S1-Q1","sec":1,"secName":"Mobile Clocking","type":"Written - Troubleshooting","q":"A staff member says the TimeTec mobile app will not let them clock in at the client site. It shows they are outside the allowed area. What do you check and what do you tell them?"},{"id":"S1-Q2","sec":1,"secName":"Mobile Clocking","type":"Written - Troubleshooting","q":"An employee forgot to clock out yesterday. Payroll closes in two days. How do you fix it and prevent it next time?"},{"id":"S1-Q3","sec":1,"secName":"Mobile Clocking","type":"Written - Troubleshooting","q":"A staff member got a new phone. The app now says their device is not registered, or face verification fails. Explain the steps you give them."},{"id":"S2-Q1","sec":2,"secName":"Leave Rules","type":"Written - Troubleshooting","q":"A new hire joined in July and asks why their annual leave balance is only a part of 14 days. How do you explain it?"},{"id":"S2-Q2","sec":2,"secName":"Leave Rules","type":"Written - Troubleshooting","q":"A leave request has been pending for a week because the approver is on leave. What can be done?"},{"id":"S2-Q3","sec":2,"secName":"Leave Rules","type":"Written - Troubleshooting","q":"An employee wants to cancel approved leave for next week and take a half day instead. What is the process and what can go wrong?"},{"id":"S3-Q1","sec":3,"secName":"Claim Workflows","type":"Written - Troubleshooting","q":"A claim was rejected because the receipt is missing. The employee is upset and says they sent it by email. What do you do?"},{"id":"S3-Q2","sec":3,"secName":"Claim Workflows","type":"Written - Troubleshooting","q":"An employee submits a travel claim above the monthly limit for that claim type. The system will not accept it. Explain why and the options."},{"id":"S3-Q3","sec":3,"secName":"Claim Workflows","type":"Written - Troubleshooting","q":"The finance manager says approved claims did not appear in this month's payroll. How do you troubleshoot?"},{"id":"S4-Q1","sec":4,"secName":"Roster Logic","type":"Written - Troubleshooting","q":"A night-shift worker is marked late and absent although they came to work. The shift runs 10pm to 6am. What do you check?"},{"id":"S4-Q2","sec":4,"secName":"Roster Logic","type":"Written - Troubleshooting","q":"Two employees want to swap shifts next week. How should this work in the system and who must approve?"},{"id":"S4-Q3","sec":4,"secName":"Roster Logic","type":"Written - Troubleshooting","q":"An employee is marked late every Monday because no roster was assigned to them. How do you find and fix the cause?"},{"id":"S5-Q1","sec":5,"secName":"Payroll Integration","type":"Written - Troubleshooting","q":"Payroll shows overtime hours that do not match the attendance report. How do you find the difference?"},{"id":"S5-Q2","sec":5,"secName":"Payroll Integration","type":"Written - Troubleshooting","q":"An employee took unpaid leave but the deduction is missing from payslip. What do you check?"},{"id":"S5-Q3","sec":5,"secName":"Payroll Integration","type":"Written - Troubleshooting","q":"A customer says attendance data does not flow to payroll at all this month. Walk through the troubleshooting."},{"id":"S6-Q1","sec":6,"secName":"Profile","type":"Written - Troubleshooting","q":"A new employee cannot log in and says they never got the email. What are the steps?"},{"id":"S6-Q2","sec":6,"secName":"Profile","type":"Written - Troubleshooting","q":"An employee moved department and now leave requests go to the wrong approver. What do you do?"},{"id":"S6-Q3","sec":6,"secName":"Profile","type":"Written - Troubleshooting","q":"HR is onboarding 20 new hires. What profile data must be correct before they can clock in and apply for leave?"},{"id":"S7-Q1","sec":7,"secName":"Customer Simulation","type":"Video - Role-play","q":"Role-play: You meet the HR manager of a 60-staff client in person. This month's payslips show the wrong overtime for 12 people. Staff are complaining. The manager is angry and says: 'Your system is useless. I will cancel today.' Respond to the client face to face, as you would in the real meeting. Record 3 to 5 minutes.","title":"Payroll is wrong and the client is angry"},{"id":"S7-Q2","sec":7,"secName":"Customer Simulation","type":"Video - Role-play","q":"Role-play: The business owner of a small company is not good with technology. They say 'I press the button and nothing happens. My staff are laughing at me.' Show them how to fix it in simple words, face to face. Record 3 to 5 minutes.","title":"A confused client who cannot use the mobile app"},{"id":"S7-Q3","sec":7,"secName":"Customer Simulation","type":"Video - Role-play","q":"Role-play: A client says they will not renew unless you give a 30% discount and add a feature that the plan does not include. They say a competitor is cheaper. Handle this meeting. Record 3 to 5 minutes.","title":"The client wants a feature and a discount"}]};          // same shape as config/questions.json (no key points)
+const mockDb = new Map();
+const copy = o => JSON.parse(JSON.stringify(o));
+const mockReply = (s, extra = {}) => ({ session: copy(s), now: Date.now(), ...extra });
+function mockMerge(s, b) {
+  if (b.answers) s.answers = { ...s.answers, ...b.answers };
+  if (b.timeSpent) s.timeSpent = { ...s.timeSpent, ...b.timeSpent };
+  if (typeof b.videoUploadConfirmed === "boolean") s.videoUploadConfirmed = b.videoUploadConfirmed;
+}
+const mockApi = {
+  async start(name, email) {
+    const key = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(key)) throw Object.assign(new Error("Please enter a valid email."), { status: 400 });
+    if (name.trim().length < 2) throw Object.assign(new Error("Please enter your full name."), { status: 400 });
+    let s = mockDb.get(key);
+    if (!s) { s = { id: key, name: name.trim(), email: key, status: "in_progress", currentSection: 1, startedAt: Date.now(), sectionStartedAt: Date.now(), answers: {}, timeSpent: {}, videoUploadConfirmed: false }; mockDb.set(key, s); }
+    return mockReply(s, { questions: PREVIEW_CFG, videoUploadUrl: "https://sqlacc.sharepoint.com/sites/Sandbox/Shared%20Documents/TimeTec%20Probation%20Test/Candidate%20Videos" });
+  },
+  async save(b) { const s = mockDb.get(b.email); mockMerge(s, b); return mockReply(s); },
+  async advance(b) {
+    const s = mockDb.get(b.email);
+    if (s.status === "in_progress" && s.currentSection === b.fromSection) {
+      mockMerge(s, b);
+      if (s.currentSection >= PREVIEW_CFG.sections.length) s.status = "submitted";
+      else { s.currentSection += 1; s.sectionStartedAt = Date.now(); }
+    }
+    return mockReply(s);
+  },
+};
+const api = API_BASE ? realApi : mockApi;
+
+/* ---------- icons (Lucide shapes, inlined so the preview needs no build step) ---------- */
+const Icon = ({ d, size = 18 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>
+);
+const I = {
+  Check: <Icon size={14} d={<polyline points="20 6 9 17 4 12"/>} />,
+  Next: <Icon d={<><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></>} />,
+  Send: <Icon d={<><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></>} />,
+  Folder: <Icon d={<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>} />,
+};
+const fmt = s => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+
+/* ---------- Start screen: name and email, nothing else ---------- */
+function Login({ onStart }) {
+  const [name, setName] = useState(""); const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const ok = name.trim().length > 1 && /^\S+@\S+\.\S+$/.test(email.trim());
+  async function submit(e) {
+    e.preventDefault(); if (!ok || busy) return;
+    setBusy(true); setErr("");
+    try { await onStart(name.trim(), email.trim()); }
+    catch (ex) { setErr(ex.message || "Could not open your test. Check your connection and try again."); setBusy(false); }
+  }
+  return (
+    <div className="wrap" style={{ display: "grid", placeItems: "center", minHeight: "85vh" }}>
+      <form className="card p-6 sm:p-8 w-full" style={{ maxWidth: 460 }} onSubmit={submit}>
+        <p className="muted text-sm mono">TIMETEC HR · PROBATION ASSESSMENT</p>
+        <h1 className="text-3xl font-bold mt-2">Before you begin</h1>
+        <p className="muted mt-3">You will answer 6 written sections and 1 video section. Each section has 30 minutes. When time ends, the section locks and moves on. You cannot go back.</p>
+        <label htmlFor="name" className="block mt-6 font-semibold text-sm">Full name</label>
+        <input id="name" className="inp mt-1" value={name} onChange={e => setName(e.target.value)} autoComplete="name" />
+        <label htmlFor="email" className="block mt-4 font-semibold text-sm">Email</label>
+        <input id="email" type="email" className="inp mt-1" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" />
+        <button className="btn btn-primary mt-6 w-full justify-center" disabled={!ok || busy}>{busy ? "Opening..." : "Start Test"} {I.Next}</button>
+        <p className="muted text-xs mt-3">If your page closes or your connection drops, open this page again and use the same email. You continue where you stopped. The clock keeps running while you are away.</p>
+        {err && <p className="text-sm mt-3" style={{ color: "var(--bad)" }}>{err}</p>}
+        {!API_BASE && <p className="muted text-xs mt-3">Preview: data is kept in memory only. Try Start Test, answer something, use "leave and sign in again" at the bottom, then enter the same email.</p>}
+      </form>
+    </div>
+  );
+}
+
+/* ---------- Written section ---------- */
+function Written({ sec, answers, setAnswer, setActiveQ, onSave }) {
+  return (
+    <div className="flex flex-col gap-5">
+      {sec.qs.map((q, i) => (
+        <div key={q.id} className="card p-5">
+          <div className="flex items-center gap-2 mb-2"><span className="pill">{q.id}</span><span className="muted text-sm">Scenario {i + 1} of 3</span></div>
+          <label htmlFor={q.id} className="block font-medium">{q.q}</label>
+          <textarea id={q.id} className="inp mt-3" placeholder="Type your answer in simple steps."
+            value={answers[q.id] || ""} onFocus={() => setActiveQ(q.id)} onBlur={() => { setActiveQ(null); onSave(); }}
+            onChange={e => setAnswer(q.id, e.target.value)} />
+          <p className="muted text-xs mt-1">{(answers[q.id] || "").trim().split(/\s+/).filter(Boolean).length} words</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ---------- Video section: the app records and saves nothing ---------- */
+function VideoSection({ sec, name, uploadUrl, confirmed, setConfirmed, onSave }) {
+  const prefix = folderName(name);
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="card p-5" style={{ background: "var(--warn-soft)", borderColor: "var(--warn)" }}>
+        <h2 className="text-xl font-bold">How to submit this section</h2>
+        <ol className="mt-2 flex flex-col gap-1.5 list-decimal pl-5">
+          <li>Read the 3 scenarios below. Record one video for each, 3 to 5 minutes, on your phone or computer.</li>
+          <li>Name each file with your name and the question number, for example <span className="mono">{prefix}_S7-Q1.mp4</span>.</li>
+          <li>Upload the 3 files using the button below.</li>
+          <li>Come back here and tick the box at the bottom.</li>
+        </ol>
+        <div className="mt-3">
+          {uploadUrl
+            ? <a className="btn btn-primary" href={uploadUrl} target="_blank" rel="noopener noreferrer">{I.Folder} Open the upload page</a>
+            : <span className="text-sm">The upload address was not set. Please ask HR where to upload.</span>}
+        </div>
+        <p className="text-sm mt-2">This page does not record or save any video.</p>
+      </div>
+      {sec.qs.map(q => (
+        <div key={q.id} className="card p-5">
+          <div className="flex items-center gap-2 mb-1"><span className="pill">{q.id}</span><span className="font-semibold">{q.title}</span></div>
+          <p>{q.q}</p>
+          <p className="muted text-xs mt-2">Save as <span className="mono">{prefix}_{q.id}.mp4</span></p>
+        </div>))}
+      <label htmlFor="uploaded" className="card p-4 flex items-start gap-3 cursor-pointer">
+        <input id="uploaded" type="checkbox" className="mt-1" checked={confirmed} onChange={e => { setConfirmed(e.target.checked); setTimeout(onSave, 0); }} />
+        <span>I have uploaded all 3 videos, named <span className="mono">{prefix}_S7-Q1.mp4</span>, <span className="mono">{prefix}_S7-Q2.mp4</span> and <span className="mono">{prefix}_S7-Q3.mp4</span>.</span>
+      </label>
+    </div>
+  );
+}
+
+/* ---------- Test shell ---------- */
+function Test({ boot, onFinish, onLeave }) {
+  const { email, name } = boot;
+  const SECTIONS = useMemo(() => boot.cfg.sections.map(s => ({ ...s, qs: boot.cfg.questions.filter(q => q.sec === s.n) })), []);
+  const SECTION_SECONDS = boot.cfg.sectionSeconds;
+  const s0 = boot.session;
+  const skew = useRef(boot.skew);                       // server clock minus this device's clock
+  const [idx, setIdx] = useState(Math.min(SECTIONS.length, Math.max(1, s0.currentSection)) - 1);
+  const [sectionStart, setSectionStart] = useState(s0.sectionStartedAt);
+  const [now, setNow] = useState(Date.now());
+  const [answers, setAnswers] = useState(s0.answers || {});
+  const [spent, setSpent] = useState(s0.timeSpent || {});
+  const [videoDone, setVideoDone] = useState(!!s0.videoUploadConfirmed);
+  const [activeQ, setActiveQ] = useState(null);
+  const [fast, setFast] = useState(false);              // preview only: runs the clock 60x faster
+  const [confirm, setConfirm] = useState(false);
+  const [saveErr, setSaveErr] = useState(false);
+  const [welcome, setWelcome] = useState(boot.resumed);
+  const busy = useRef(false);
+  const idxRef = useRef(idx); idxRef.current = idx;
+  const latest = useRef({}); latest.current = { answers, spent, videoDone };
+  const sec = SECTIONS[idx]; const last = idx === SECTIONS.length - 1;
+
+  // The clock comes from the server's saved start time, so a refresh or a new device cannot reset it.
+  const left = Math.max(0, SECTION_SECONDS - Math.floor(((now + skew.current - sectionStart) / 1000) * (fast ? 60 : 1)));
+  const snapshot = () => ({ email, answers: latest.current.answers, timeSpent: latest.current.spent, videoUploadConfirmed: latest.current.videoDone });
+
+  function applyServer(d) {
+    skew.current = d.now - Date.now();
+    const s = d.session; setSectionStart(s.sectionStartedAt);
+    if (s.status !== "in_progress") { onFinish(); return; }
+    if (s.currentSection - 1 !== idxRef.current) { setIdx(s.currentSection - 1); setActiveQ(null); setConfirm(false); window.scrollTo(0, 0); }
+  }
+  async function persist() {
+    try { applyServer(await api.save(snapshot())); setSaveErr(false); } catch (e) { setSaveErr(true); }
+  }
+  async function next() {
+    if (busy.current) return;
+    busy.current = true; setConfirm(false);
+    try { applyServer(await api.advance({ ...snapshot(), fromSection: sec.n })); setSaveErr(false); setActiveQ(null); window.scrollTo(0, 0); }
+    catch (e) { setSaveErr(true); }
+    busy.current = false;
+  }
+
+  useEffect(() => {
+    const t = setInterval(() => { setNow(Date.now()); if (activeQ) setSpent(s => ({ ...s, [activeQ]: (s[activeQ] || 0) + 1 })); }, 1000);
+    return () => clearInterval(t);
+  }, [activeQ]);
+  useEffect(() => { const t = setInterval(persist, 20000); return () => clearInterval(t); }, []);   // autosave every 20 seconds
+  useEffect(() => { if (left === 0) next(); }, [left, idx, Math.floor(now / 5000)]);                // retries every 5 seconds if offline
+
+  async function leave() { await persist(); onLeave(); }
+  const answered = q => (answers[q.id] || "").trim().length > 0;
+  return (
+    <div className="wrap grid gap-5 md:grid-cols-[250px_minmax(0,1fr)]">
+      <aside className="card p-3 md:sticky md:top-4 self-start">
+        <p className="muted text-xs px-2 pb-2 mono">{name.toUpperCase()}</p>
+        {SECTIONS.map((s, i) => (
+          <div key={s.n} className={"step " + (i === idx ? "cur" : i < idx ? "" : "locked")}>
+            <span className={"dot " + (i < idx ? "done" : i === idx ? "cur" : "")}>{i < idx ? I.Check : s.n}</span>
+            <span className="min-w-0 truncate">{s.name}</span>
+          </div>))}
+        <div className="bar mt-3 mx-2"><i style={{ width: (idx / SECTIONS.length) * 100 + "%" }} /></div>
+        <p className="muted text-xs px-2 mt-1">{idx} of {SECTIONS.length} sections done</p>
+      </aside>
+
+      <main className="min-w-0 flex flex-col gap-5">
+        {welcome && (
+          <div className="card p-4 flex items-center justify-between gap-3 flex-wrap" style={{ background: "var(--accent-soft)", borderColor: "var(--accent)" }}>
+            <p className="text-sm">Welcome back, {name}. Your saved answers are here. You are in section {sec.n}, and the clock kept running.</p>
+            <button className="btn" onClick={() => setWelcome(false)}>OK</button>
+          </div>)}
+        <div className="card p-4 flex items-center justify-between gap-4 flex-wrap md:sticky md:top-4 z-10">
+          <div className="min-w-0">
+            <p className="muted text-xs mono">SECTION {sec.n} OF {SECTIONS.length}</p>
+            <h2 className="text-2xl font-bold">{sec.name}</h2>
+          </div>
+          <div className="text-right">
+            <div className={"timer " + (left < 300 ? "low" : "")}>{fmt(left)}</div>
+            <p className="muted text-xs">time left in this section</p>
+          </div>
+        </div>
+        {saveErr && <p className="text-sm card p-3" style={{ color: "var(--bad)" }}>Your last save did not reach the server. Keep this page open. It will try again.</p>}
+
+        {sec.video
+          ? <VideoSection sec={sec} name={name} uploadUrl={boot.videoUploadUrl} confirmed={videoDone} setConfirmed={setVideoDone} onSave={persist} />
+          : <Written sec={sec} answers={answers} setAnswer={(id, v) => setAnswers(a => ({ ...a, [id]: v }))} setActiveQ={setActiveQ} onSave={persist} />}
+
+        <div className="card p-4 flex items-center justify-between gap-3 flex-wrap">
+          {!API_BASE
+            ? <div className="flex flex-col gap-1">
+                <label className="muted text-xs flex items-center gap-2" htmlFor="fast"><input id="fast" type="checkbox" checked={fast} onChange={e => setFast(e.target.checked)} /> Preview only: run clock 60x faster</label>
+                <button className="muted text-xs underline text-left" onClick={leave}>Preview only: leave and sign in again</button>
+              </div>
+            : <span />}
+          {!confirm
+            ? <button className="btn btn-primary" disabled={sec.video && !videoDone} onClick={() => setConfirm(true)}>{last ? "Submit test" : "Finish section"} {last ? I.Send : I.Next}</button>
+            : <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm">{sec.video ? "" : `${sec.qs.filter(answered).length} of 3 answered. `}You cannot come back.</span>
+                <button className="btn" onClick={() => setConfirm(false)}>Keep working</button>
+                <button className="btn btn-primary" onClick={next}>Yes, {last ? "submit" : "continue"}</button>
+              </div>}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function Done({ boot }) {
+  return (
+    <div className="wrap" style={{ display: "grid", placeItems: "center", minHeight: "85vh" }}>
+      <div className="card p-8 text-center" style={{ maxWidth: 460 }}>
+        <div className="dot done mx-auto" style={{ width: 44, height: 44 }}>{I.Check}</div>
+        <h1 className="text-3xl font-bold mt-4">Test submitted</h1>
+        <p className="muted mt-3">Thank you, {boot.name}. Your answers are saved. HR will contact you at {boot.email}. You can close this page.</p>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [boot, setBoot] = useState(null); const [done, setDone] = useState(false);
+  async function start(name, email) {
+    const d = await api.start(name, email);
+    const s = d.session;
+    const b = { email: s.email, name: s.name, session: s, cfg: d.questions, videoUploadUrl: d.videoUploadUrl, skew: d.now - Date.now(),
+      resumed: Object.keys(s.answers || {}).length > 0 || s.currentSection > 1 };
+    setBoot(b); setDone(s.status !== "in_progress");
+  }
+  if (done) return <Done boot={boot} />;
+  return boot ? <Test key={boot.email + "-" + boot.session.startedAt} boot={boot} onFinish={() => setDone(true)} onLeave={() => setBoot(null)} /> : <Login onStart={start} />;
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+
+</body>
+</html>
