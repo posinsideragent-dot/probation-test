@@ -115,6 +115,9 @@ fresh.ai = {}; MOCK.push(fresh);
 MOCK.forEach(m => { m.email = m.email.replace("example.com", "sqlacc.com"); m.videoFolder = m.name.trim().replace(/[^\w\s-]/g, "").replace(/\s+/g, "_"); m.videoUploadConfirmed = m.status !== "in_progress" && m.id !== "s6"; });
 const VIDEO_ROOT = "https://sqlacc.sharepoint.com/sites/Sandbox/Shared%20Documents/TimeTec%20Probation%20Test/Candidate%20Videos"; // change to your own video folder link
 const folderOf = c => c.videoFolder || c.name.trim().replace(/[^\w\s-]/g, "").replace(/\s+/g, "_");
+// A score is the admin's own score (manualScore) or, if none, the AI score. Both are 0 to 10.
+const scoreOf = (c, qid) => { const m = (c.manualScore || {})[qid]; return Number.isInteger(m) ? m : (c.ai && c.ai[qid] ? c.ai[qid].score : null); };
+const scoredCount = c => WRITTEN.filter(q => scoreOf(c, q.id) !== null).length;
 const hasAi = c => Object.keys(c.ai || {}).length > 0;
 
 /* ------------------------------------------------------------------
@@ -172,10 +175,12 @@ function useSessions(pass) {
 
 /* ---------- helpers ---------- */
 const mmss = s => { s = Math.max(0, s); return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); };
-const writtenScore = c => { const v = WRITTEN.map(q => c.ai[q.id]?.score ?? 0); return Math.round(v.reduce((a, b) => a + b, 0) / (v.length * 10) * 100); };
+const writtenScore = c => { const v = WRITTEN.map(q => scoreOf(c, q.id) ?? 0); return Math.round(v.reduce((a, b) => a + b, 0) / (v.length * 10) * 100); };
 const videoAvg = c => { const v = VIDEO.map(q => c.videoRating[q.id]).filter(Boolean); return v.length === VIDEO.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
 function recommend(c) {
-  if (!hasAi(c)) return { label: "Not graded yet", tone: "warn", why: "Open the Decision Hub and click Grade now to score the written answers." };
+  const n = scoredCount(c);
+  if (n === 0) return { label: "Not scored yet", tone: "warn", why: "Score the written answers in the Review Center. Or click Grade now if an AI key is set." };
+  if (n < WRITTEN.length) return { label: "Scoring in progress", tone: "warn", why: `${n} of ${WRITTEN.length} written answers scored. Score the rest in the Review Center.` };
   const w = writtenScore(c), v = videoAvg(c);
   if (v === null) return { label: w >= 70 ? "Leaning confirm" : w >= 50 ? "Borderline" : "Leaning reject", tone: "warn", why: `Written score ${w}%. Rate the 3 videos to finish the recommendation.` };
   const total = Math.round(w * 0.7 + (v / 5) * 100 * 0.3);
@@ -227,7 +232,7 @@ function CandList({ list, sel, setSel }) {
         const rec = recommend(c);
         return (
           <button key={c.id} className={"row " + (sel === c.id ? "on" : "")} onClick={() => setSel(c.id)}>
-            <span className="min-w-0 flex-1"><span className="block font-semibold truncate">{c.name}</span><span className="muted text-xs">{hasAi(c) ? "Written " + writtenScore(c) + "%" : "Not graded"}</span></span>
+            <span className="min-w-0 flex-1"><span className="block font-semibold truncate">{c.name}</span><span className="muted text-xs">{scoredCount(c) === WRITTEN.length ? "Written " + writtenScore(c) + "%" : scoredCount(c) === 0 ? "Not scored" : "Scored " + scoredCount(c) + "/" + WRITTEN.length}</span></span>
             {c.decision ? <span className={"pill " + (c.decision === "confirmed" ? "p-ok" : "p-bad")}>{c.decision}</span> : <span className={"pill p-" + rec.tone}>{rec.label}</span>}
           </button>);
       })}
@@ -251,7 +256,7 @@ function Review({ list, sel, setSel, update }) {
           const a = c.ai[q.id];
           return (
             <div key={q.id} className="card p-4">
-              <div className="flex gap-2 items-center flex-wrap"><span className="pill p-live">{q.id}</span>{a && <span className="pill p-warn">AI score {a.score}/10</span>}{c.timeSpent[q.id] && <span className="muted text-xs mono">{mmss(c.timeSpent[q.id])} spent</span>}</div>
+              <div className="flex gap-2 items-center flex-wrap"><span className="pill p-live">{q.id}</span>{a && <span className="pill p-warn">AI suggests {a.score}/10</span>}{c.timeSpent[q.id] && <span className="muted text-xs mono">{mmss(c.timeSpent[q.id])} spent</span>}</div>
               <p className="font-medium mt-2">{q.title ? q.title + ". " : ""}{q.q}</p>
               <div className="grid gap-3 mt-3 md:grid-cols-2">
                 {q.sec < 7 ? (
@@ -259,6 +264,12 @@ function Review({ list, sel, setSel, update }) {
                     <p className="lbl mb-1">Candidate answer</p>
                     <p>{c.answers[q.id] || "No answer."}</p>
                     {a && <p className="muted text-xs mt-2">AI note: {a.note}</p>}
+                    <p className="lbl mt-3 mb-1">Your score (0 to 10){scoreOf(c, q.id) !== null && (c.manualScore || {})[q.id] === undefined ? " - using the AI score" : ""}</p>
+                    <div className="flex gap-1 flex-wrap" role="radiogroup" aria-label={"Score for " + q.id}>
+                      {[0,1,2,3,4,5,6,7,8,9,10].map(n => <button key={n} className="btn" style={{ padding: ".2rem .5rem", minWidth: "2rem", ...((c.manualScore || {})[q.id] === n ? { background: "var(--accent)", color: "var(--accent-fg)", borderColor: "var(--accent)" } : {}) }}
+                        onClick={() => update(c.id, { manualScore: { ...(c.manualScore || {}), [q.id]: n } })}>{n}</button>)}
+                      {(c.manualScore || {})[q.id] !== undefined && <button className="btn" style={{ padding: ".2rem .5rem" }} onClick={() => { const m = { ...(c.manualScore || {}) }; delete m[q.id]; update(c.id, { manualScore: m }); }}>Clear</button>}
+                    </div>
                   </div>
                 ) : (
                   <div className="min-w-0 p-3 rounded-lg" style={{ background: "var(--bg)" }}>
@@ -299,8 +310,8 @@ function GradePanel({ c, grade }) {
   async function run() { setBusy(true); setErr(""); try { await grade(c.id); } catch (e) { setErr(e.message || "Grading failed."); } setBusy(false); }
   return (
     <div className="card p-4 flex flex-col gap-2">
-      <p className="font-semibold">Written answers are not graded yet</p>
-      <p className="muted text-sm">Grading starts by itself when a candidate submits. It can take up to a minute. If it did not finish, click Grade now.</p>
+      <p className="font-semibold">Written answers are not scored yet</p>
+      <p className="muted text-sm">Open the Review Center and give each written answer a score from 0 to 10. If an AI key is set on the Worker, grading starts by itself on submit. Or click Grade now.</p>
       {c.gradeError && <p className="text-sm" style={{ color: "var(--bad)" }}>Last attempt failed: {c.gradeError}</p>}
       <div><button className="btn btn-ok" disabled={busy} onClick={run}>{busy ? "Grading..." : "Grade now"}</button></div>
       {err && <p className="text-sm" style={{ color: "var(--bad)" }}>{err}</p>}
@@ -333,10 +344,10 @@ function Decision({ list, sel, setSel, update, grade }) {
   const rec = recommend(c); const v = videoAvg(c);
   const bySection = [1,2,3,4,5,6].map(n => {
     const qs = WRITTEN.filter(q => q.sec === n);
-    return { n, pct: Math.round(qs.reduce((t, q) => t + (c.ai[q.id]?.score ?? 0), 0) / (qs.length * 10) * 100), secs: qs.reduce((t, q) => t + (c.timeSpent[q.id] || 0), 0) };
+    return { n, pct: Math.round(qs.reduce((t, q) => t + (scoreOf(c, q.id) ?? 0), 0) / (qs.length * 10) * 100), secs: qs.reduce((t, q) => t + (c.timeSpent[q.id] || 0), 0) };
   });
   const maxQ = Math.max(...WRITTEN.map(q => c.timeSpent[q.id] || 0), 1);
-  const graded = hasAi(c);
+  const graded = scoredCount(c) > 0;
   const decide = d => { 
     update(c.id, { decision: d, status: "decided", decidedAt: Date.now() }); setAsk(null); };
   const tone = { ok: ["var(--ok-soft)", "var(--ok)"], bad: ["var(--bad-soft)", "var(--bad)"], warn: ["var(--warn-soft)", "var(--warn)"] }[rec.tone];
