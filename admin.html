@@ -127,7 +127,7 @@ const hasAi = c => Object.keys(c.ai || {}).length > 0;
    The Worker checks the admin passcode, reads the data repo, and grades with Claude.
    It has no push updates, so the Live Monitor reads again every 10 seconds.
 ------------------------------------------------------------------- */
-const API_BASE = "https://probation-api.CHANGE-ME.workers.dev";
+const API_BASE = "https://probation-api.posinsideragent.workers.dev";
 let SKEW = 0;                                   // server clock minus this device's clock
 async function adminCall(path, body, pass) {
   const res = await fetch(API_BASE + path, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + pass }, body: JSON.stringify(body || {}) });
