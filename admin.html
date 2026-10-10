@@ -164,13 +164,17 @@ function useSessions(pass) {
     setSessions(list => list.map(s => s.id === id ? { ...s, ...patch } : s));      // show the change at once
     if (API_BASE) await adminCall("/api/admin/result", { id, patch }, pass);
   };
+  const remove = async id => {                                // deletes the candidate's files on the server too
+    if (API_BASE) await adminCall("/api/admin/delete", { id }, pass);
+    setSessions(list => list.filter(s => s.id !== id));
+  };
   const grade = async id => {
     let ai;
     if (!API_BASE) { await new Promise(r => setTimeout(r, 1200)); ai = mockGrade(sessions.find(s => s.id === id)); }
     else ai = (await adminCall("/api/admin/grade", { id }, pass)).ai;
     setSessions(list => list.map(s => s.id === id ? { ...s, ai, gradeError: null, gradedAt: Date.now() } : s));
   };
-  return { sessions, update, grade, error, denied };
+  return { sessions, update, grade, remove, error, denied };
 }
 
 /* ---------- helpers ---------- */
@@ -193,7 +197,7 @@ const Tick = <Ic d={<polyline points="20 6 9 17 4 12"/>} />;
 const Cross = <Ic d={<><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>} />;
 
 /* ---------- Live Monitor ---------- */
-function Live({ sessions, now, onOpen }) {
+function Live({ sessions, now, onOpen, remove }) {
   const live = sessions.filter(s => s.status === "in_progress");
   return (
     <div className="flex flex-col gap-4">
@@ -203,7 +207,7 @@ function Live({ sessions, now, onOpen }) {
       </div>
       <div className="card overflow-x-auto">
         <table className="w-full text-left" style={{ minWidth: 560 }}>
-          <thead><tr className="lbl"><th className="p-3">Candidate</th><th className="p-3">Active section</th><th className="p-3">Section progress</th><th className="p-3 text-right">Time left</th></tr></thead>
+          <thead><tr className="lbl"><th className="p-3">Candidate</th><th className="p-3">Active section</th><th className="p-3">Section progress</th><th className="p-3 text-right">Time left</th><th className="p-3"></th></tr></thead>
           <tbody>
             {live.map(s => {
               const left = SECTION_SECONDS - Math.floor((now - s.sectionStartedAt) / 1000);
@@ -213,9 +217,10 @@ function Live({ sessions, now, onOpen }) {
                   <td className="p-3">{s.currentSection} of 7 · {SECTION_NAMES[s.currentSection]}</td>
                   <td className="p-3" style={{ minWidth: 140 }}><div className="bar"><i style={{ width: Math.min(100, ((SECTION_SECONDS - Math.max(0, left)) / SECTION_SECONDS) * 100) + "%", background: left < 300 ? "var(--warn)" : "var(--accent)" }} /></div></td>
                   <td className="p-3 text-right mono text-xl" style={{ color: left < 300 ? "var(--warn)" : "var(--fg)" }}>{mmss(left)}</td>
+                  <td className="p-3"><DeleteBtn key={s.id} c={s} remove={remove} small /></td>
                 </tr>);
             })}
-            {!live.length && <tr><td className="p-6 muted" colSpan="4">No one is taking the test right now. New sessions appear here as soon as a candidate clicks Start Test.</td></tr>}
+            {!live.length && <tr><td className="p-6 muted" colSpan="5">No one is taking the test right now. New sessions appear here as soon as a candidate clicks Start Test.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -241,7 +246,19 @@ function CandList({ list, sel, setSel }) {
 }
 
 /* ---------- Review Center ---------- */
-function Review({ list, sel, setSel, update }) {
+function DeleteBtn({ c, remove, small }) {
+  const [ask, setAsk] = useState(false); const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  async function run() { setBusy(true); setErr(""); try { await remove(c.id); } catch (e) { setErr(e.message || "Delete failed."); setBusy(false); } }
+  if (!ask) return <button className="btn btn-bad" style={small ? { padding: ".2rem .55rem" } : {}} onClick={() => setAsk(true)}>Delete</button>;
+  return (
+    <div className="flex flex-col gap-2 items-start">
+      <p className="text-sm font-semibold" style={{ color: "var(--bad)" }}>Delete all data for {c.name}? Answers, scores, ratings and decision are removed from the server for good. This cannot be undone.</p>
+      <div className="flex gap-2"><button className="btn" disabled={busy} onClick={() => setAsk(false)}>Cancel</button><button className="btn btn-bad" disabled={busy} onClick={run}>{busy ? "Deleting..." : "Yes, delete permanently"}</button></div>
+      {err && <p className="text-sm" style={{ color: "var(--bad)" }}>{err}</p>}
+    </div>
+  );
+}
+function Review({ list, sel, setSel, update, remove }) {
   const c = list.find(x => x.id === sel) || list[0];
   const [secN, setSecN] = useState(1);
   const qs = QUESTIONS.filter(q => q.sec === secN);
@@ -249,6 +266,10 @@ function Review({ list, sel, setSel, update }) {
     <div className="grid gap-4 md:grid-cols-[250px_minmax(0,1fr)]">
       <CandList list={list} sel={c.id} setSel={setSel} />
       <div className="min-w-0 flex flex-col gap-4">
+        <div className="card p-3 flex items-start justify-between gap-3 flex-wrap">
+          <div><p className="font-semibold">{c.name}</p><p className="muted text-xs">{c.email}. You can change any score or rating at any time.</p></div>
+          <DeleteBtn key={c.id} c={c} remove={remove} />
+        </div>
         <div className="flex gap-2 flex-wrap">
           {[1,2,3,4,5,6,7].map(n => <button key={n} className={"tab " + (secN === n ? "on" : "")} onClick={() => setSecN(n)}>{n}. {SECTION_NAMES[n]}</button>)}
         </div>
@@ -338,7 +359,7 @@ function Gate({ onEnter, error }) {
 }
 
 /* ---------- Decision Hub ---------- */
-function Decision({ list, sel, setSel, update, grade }) {
+function Decision({ list, sel, setSel, update, grade, remove, goReview }) {
   const c = list.find(x => x.id === sel) || list[0];
   const [ask, setAsk] = useState(null);
   const rec = recommend(c); const v = videoAvg(c);
@@ -383,12 +404,17 @@ function Decision({ list, sel, setSel, update, grade }) {
 
         <div className="card p-4 flex items-center justify-between gap-3 flex-wrap">
           {c.decision
-            ? <p className="font-semibold">Decision recorded: <span style={{ color: c.decision === "confirmed" ? "var(--ok)" : "var(--bad)" }}>{c.decision === "confirmed" ? "Probation confirmed" : "Rejected"}</span></p>
+            ? <><p className="font-semibold">Decision recorded: <span style={{ color: c.decision === "confirmed" ? "var(--ok)" : "var(--bad)" }}>{c.decision === "confirmed" ? "Probation confirmed" : "Rejected"}</span></p>
+                <button className="btn" onClick={() => update(c.id, { decision: null, status: "submitted" })}>Change decision</button></>
             : ask
               ? <><p className="font-semibold">{ask === "confirmed" ? "Confirm probation" : "Reject"} for {c.name}?</p>
                   <div className="flex gap-2"><button className="btn" onClick={() => setAsk(null)}>Cancel</button><button className={"btn " + (ask === "confirmed" ? "btn-ok" : "btn-bad")} onClick={() => decide(ask)}>Yes, {ask === "confirmed" ? "confirm" : "reject"}</button></div></>
-              : <><p className="muted">Your decision overrides the AI recommendation.</p>
+              : <><p className="muted">Your decision overrides the recommendation.</p>
                   <div className="flex gap-2"><button className="btn btn-bad" onClick={() => setAsk("rejected")}>{Cross} Reject</button><button className="btn btn-ok" onClick={() => setAsk("confirmed")}>{Tick} Confirm probation</button></div></>}
+        </div>
+        <div className="card p-4 flex items-start justify-between gap-3 flex-wrap">
+          <div><p className="font-semibold">Manage {c.name}</p><p className="muted text-sm">Change scores or ratings in the Review Center. Delete removes every file for this candidate.</p></div>
+          <div className="flex gap-2 items-start flex-wrap"><button className="btn" onClick={goReview}>Edit scores</button><DeleteBtn key={c.id} c={c} remove={remove} /></div>
         </div>
       </div>
     </div>
@@ -397,7 +423,7 @@ function Decision({ list, sel, setSel, update, grade }) {
 
 function App() {
   const [pass, setPass] = useState(null);
-  const { sessions, update, grade, error, denied } = useSessions(pass);
+  const { sessions, update, grade, remove, error, denied } = useSessions(pass);
   const [tab, setTab] = useState("live");
   const [sel, setSel] = useState("s4");
   const [now, setNow] = useState(Date.now());
@@ -418,9 +444,9 @@ function App() {
       </header>
       {error && !denied && <p className="text-sm card p-3" style={{ color: "var(--bad)" }}>Could not refresh: {error}. Trying again in 10 seconds.</p>}
       {!API_BASE && <p className="muted text-xs">Preview data. Three candidates are taking the test and four have finished (one is not graded yet). All are examples. Live, this page reads the server every 10 seconds.</p>}
-      {tab === "live" && <Live sessions={sessions} now={now} />}
-      {tab === "review" && (done.length ? <Review list={done} sel={sel} setSel={setSel} update={update} /> : none)}
-      {tab === "decision" && (done.length ? <Decision list={done} sel={sel} setSel={setSel} update={update} grade={grade} /> : none)}
+      {tab === "live" && <Live sessions={sessions} now={now} remove={remove} />}
+      {tab === "review" && (done.length ? <Review list={done} sel={sel} setSel={setSel} update={update} remove={remove} /> : none)}
+      {tab === "decision" && (done.length ? <Decision list={done} sel={sel} setSel={setSel} update={update} grade={grade} remove={remove} goReview={() => setTab("review")} /> : none)}
     </div>
   );
 }
